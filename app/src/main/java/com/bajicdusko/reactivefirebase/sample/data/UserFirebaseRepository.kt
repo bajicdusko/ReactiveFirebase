@@ -42,9 +42,9 @@ import io.reactivex.Single
 class UserFirebaseRepository(firebaseAuth: FirebaseAuth, firebaseDatabase: FirebaseDatabase) : FirebaseRepositoryData(
     firebaseAuth, firebaseDatabase) {
 
-    fun getUsers(): Single<List<User>> = getOnAuthenticatedFirebase { getListValue(User::class, "data", "users") }
+    fun getUsers(): Single<List<User>> = getOnAuthenticatedFirebase { getListValue(User::class, "users") }
 
     fun getUserUpdates(): Observable<List<User>> = observeOnAuthenticatedFirebase {
-        listenForListChanges(User::class, "data", "users")
+        listenForListChanges(User::class, "users")
     }
 }

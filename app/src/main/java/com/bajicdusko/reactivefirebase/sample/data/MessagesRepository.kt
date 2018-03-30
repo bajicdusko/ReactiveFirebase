@@ -13,7 +13,7 @@ class MessagesRepository(firebaseAuth: FirebaseAuth, firebaseDatabase: FirebaseD
 
     fun getUserMessages(userId: String): Single<List<Message>> {
         return getOnAuthenticatedFirebase {
-            getListValue(Message::class, "data", "messages", userId)
+            getListValue(Message::class, "messages", userId)
         }
     }
 }

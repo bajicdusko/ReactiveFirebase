@@ -87,7 +87,7 @@ inline fun <T : Any> FirebaseDatabase.singleValue(reference: String, children: A
             }
 
             override fun onDataChange(dataSnapshot: DataSnapshot?) {
-                val childDataSnapshot = dataSnapshot.childDataSnapshot(children)
+                val childDataSnapshot = dataSnapshot.childOrOriginalDataSnapshot(children)
                 val defaultValue = defaultValue()
                 if (childDataSnapshot != null) {
                     val retrievedValue = onDataSnapshot(childDataSnapshot)
@@ -148,7 +148,7 @@ inline fun <T : Any> FirebaseDatabase.listenForChanges(reference: String,
             }
 
             override fun onDataChange(dataSnapshot: DataSnapshot?) {
-                val childDataSnapshot = dataSnapshot.childDataSnapshot(children)
+                val childDataSnapshot = dataSnapshot.childOrOriginalDataSnapshot(children)
                 val defaultValue = defaultValue()
                 if (childDataSnapshot != null) {
                     val retrievedValue = onDataSnapshot(childDataSnapshot)
@@ -279,9 +279,9 @@ inline fun <T : Any> FirebaseDatabase.lastOrSortedValue(reference: String,
     crossinline onDataSnapshot: DataSnapshot.() -> T?,
     crossinline defaultValue: () -> T?): Single<T> =
     Single.create<T> {
-        val childDataReference = getReference(reference).childDataReference(children)
-        if (childDataReference != null) {
-            var lastValueQuery: Query = childDataReference.orderByChild(lastByOrSortField)
+        val dataReference = getReference(reference).childOrOriginalDataReference(children)
+        if (dataReference != null) {
+            var lastValueQuery: Query = dataReference.orderByChild(lastByOrSortField)
             if (lastValue) {
                 lastValueQuery = lastValueQuery.limitToLast(1)
             }
@@ -324,7 +324,7 @@ fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out
 inline fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out String>?,
     crossinline onDataReference: DatabaseReference.() -> T?): Single<T> =
     Single.fromCallable({
-        val childDataReference = getReference(reference).childDataReference(children)
+        val childDataReference = getReference(reference).childOrOriginalDataReference(children)
         if (childDataReference != null) {
             onDataReference(childDataReference)
         } else {
@@ -334,14 +334,15 @@ inline fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Ar
 
 fun FirebaseDatabase.remove(reference: String, children: Array<out String>?): Single<Any> =
     Single.fromCallable {
-        getReference(reference).childDataReference(children)?.removeValue()
+        getReference(reference).childOrOriginalDataReference(children)?.removeValue()
         IRRELEVANT
     }
 
 /**
  * Iterating through children of [DatabaseReference] and returning last found child [DatabaseReference]
+ * If there are no children, returning original DatabaseReference
  */
-fun DatabaseReference?.childDataReference(children: Array<out String>?): DatabaseReference? {
+fun DatabaseReference?.childOrOriginalDataReference(children: Array<out String>?): DatabaseReference? {
     var tempReference = this
     children?.forEach {
         tempReference = tempReference.subDataReference(it)
@@ -354,8 +355,9 @@ fun DatabaseReference?.subDataReference(child: String): DatabaseReference? = thi
 
 /**
  * Iterating through children of [DataSnapshot] and returning last found child [DataSnapshot]
+ * If there are no children, returning original DataSnapshot
  */
-fun DataSnapshot?.childDataSnapshot(children: Array<out String>?): DataSnapshot? {
+fun DataSnapshot?.childOrOriginalDataSnapshot(children: Array<out String>?): DataSnapshot? {
     var tempSnapshot = this
     children?.forEach {
         tempSnapshot = tempSnapshot.subDataSnapshot(it)
