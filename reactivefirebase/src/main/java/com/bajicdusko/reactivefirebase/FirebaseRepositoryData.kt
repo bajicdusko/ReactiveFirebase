@@ -1,6 +1,5 @@
 package com.bajicdusko.reactivefirebase
 
-import android.content.Context
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -13,9 +12,20 @@ import kotlin.reflect.KClass
 /**
  * Created by Bajic Dusko (www.bajicdusko.com) on 27.03.18.
  */
-class FirebaseRepositoryData constructor(val firebaseAuth: FirebaseAuth,
-    val db: FirebaseDatabase,
-    val context: Context) {
+open class FirebaseRepositoryData constructor(val firebaseAuth: FirebaseAuth, val db: FirebaseDatabase) {
+
+    private fun login(): Single<Boolean> {
+        return isLoggedIn()
+            .flatMap { if (!it) saveLoginCredentials("") else Single.just(it) }
+    }
+
+    protected fun <T> getOnAuthenticatedFirebase(fn: () -> Single<T>): Single<T> {
+        return login().flatMap { fn() }
+    }
+
+    protected fun <T> observeOnAuthenticatedFirebase(fn: () -> Observable<T>): Observable<T> {
+        return login().flatMapObservable { fn() }
+    }
 
     fun isLoggedIn(): Single<Boolean> = Single.fromCallable({
         firebaseAuth.currentUser != null
