@@ -1,4 +1,4 @@
-package com.pastecan.data.exception
+package com.bajicdusko.reactivefirebase.exception
 
 /**
  * Created by Dusko Bajic on 25.06.17.

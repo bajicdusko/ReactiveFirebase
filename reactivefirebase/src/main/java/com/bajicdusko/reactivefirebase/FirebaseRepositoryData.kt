@@ -1,10 +1,10 @@
 package com.bajicdusko.reactivefirebase
 
+import com.bajicdusko.reactivefirebase.exception.FirebaseUnknownSignInException
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.database.FirebaseDatabase
-import com.pastecan.data.exception.FirebaseUnknownSignInException
 import io.reactivex.Observable
 import io.reactivex.Single
 import kotlin.reflect.KClass
@@ -80,6 +80,27 @@ open class FirebaseRepositoryData constructor(val firebaseAuth: FirebaseAuth, va
             }
             mutableList
         }, { emptyList<T>() })
+    }
+
+    fun <T : Any> getMapValue(listItemTypeClass: KClass<T>, reference: String,
+        vararg children: String): Single<Map<String, List<T>>> {
+        return db.singleValue(reference, children, {
+            val map = HashMap<String, List<T>>()
+
+            this.children.forEach { mapKey ->
+                val list = mutableListOf<T>()
+                mapKey.children.forEach {
+                    val value = it.getValue(listItemTypeClass.java)
+                    if (value != null) {
+                        list.add(value)
+                    }
+                }
+
+                map[mapKey.key] = list
+            }
+
+            map
+        }, { HashMap() })
     }
 
     fun <T : Any> getLastValue(typeClass: KClass<T>, reference: String, lastByField: String,
