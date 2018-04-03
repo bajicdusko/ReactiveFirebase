@@ -10,6 +10,7 @@ import com.google.firebase.database.Query
 import com.google.firebase.database.ValueEventListener
 import io.reactivex.Observable
 import io.reactivex.Single
+import io.reactivex.SingleEmitter
 import timber.log.Timber
 
 private val IRRELEVANT = Any()
@@ -313,6 +314,79 @@ inline fun <T : Any> FirebaseDatabase.lastOrSortedValue(reference: String,
             })
         }
     }
+
+inline fun <T : Any> FirebaseDatabase.getByKey(reference: String, children: Array<out String>?, key: String,
+    crossinline onDataSnapshot: DataSnapshot.() -> T?): Single<T> {
+    return Single.create<T> {
+        val dataReference = getReference(reference).childOrOriginalDataReference(children)
+        if (dataReference == null) {
+            it.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
+        } else {
+            val firstItemQuery = dataReference.orderByKey().equalTo(key).limitToFirst(1)
+            firstItemQuery.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onCancelled(dbError: DatabaseError?) {
+                    it.cancel(dbError, reference, children, {
+                        firstItemQuery.removeEventListener(this)
+                    })
+                }
+
+                override fun onDataChange(dataSnapshot: DataSnapshot?) {
+                    it.readData(dataSnapshot, reference, children, onDataSnapshot, {
+                        firstItemQuery.removeEventListener(this)
+                    })
+                }
+            })
+        }
+    }
+}
+
+inline fun <T : Any> FirebaseDatabase.getByChildValue(reference: String, children: Array<out String>?, field: String,
+    value: String, crossinline onDataSnapshot: DataSnapshot.() -> T?): Single<T> {
+    return Single.create<T> {
+        val dataReference = getReference(reference).childOrOriginalDataReference(children)
+
+        if (dataReference == null) {
+            it.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
+        } else {
+            val foundChildQuery = dataReference.orderByChild(field).equalTo(value).limitToFirst(1)
+            foundChildQuery.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onCancelled(dbError: DatabaseError?) {
+                    it.cancel(dbError, reference, children, {
+                        foundChildQuery.removeEventListener(this)
+                    })
+                }
+
+                override fun onDataChange(dataSnapshot: DataSnapshot?) {
+                    it.readData(dataSnapshot, reference, children, onDataSnapshot, {
+                        foundChildQuery.removeEventListener(this)
+                    })
+                }
+            })
+        }
+    }
+}
+
+inline fun <T : Any> SingleEmitter<T>.cancel(dbError: DatabaseError?, reference: String, children: Array<out String>?,
+    removeCallback: () -> Unit) {
+    onError(FirebaseDatabaseException.databaseIssue(dbError?.message, dbError?.details, reference, children))
+    removeCallback()
+}
+
+inline fun <T : Any> SingleEmitter<T>.readData(dataSnapshot: DataSnapshot?, reference: String,
+    children: Array<out String>?, crossinline onDataSnapshot: DataSnapshot.() -> T?, removeCallback: () -> Unit) {
+    if (dataSnapshot != null) {
+        val retrievedValue = onDataSnapshot(dataSnapshot)
+        if (retrievedValue == null) {
+            onError(RetrievedValueNullException(reference,
+                children))
+        } else {
+            onSuccess(retrievedValue)
+        }
+    } else {
+        onError(FirebaseDatabaseException.dataSnapshotIssue(reference, children))
+    }
+    removeCallback()
+}
 
 fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out String>?,
     value: T) =

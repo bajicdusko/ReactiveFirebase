@@ -1,6 +1,7 @@
 package com.bajicdusko.reactivefirebase
 
 import com.bajicdusko.reactivefirebase.exception.FirebaseUnknownSignInException
+import com.bajicdusko.reactivefirebase.exception.RetrievedValueNullException
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -119,6 +120,17 @@ open class FirebaseRepositoryData constructor(val firebaseAuth: FirebaseAuth, va
             }
             mutableList
         }, { emptyList<T>() })
+
+    fun <T : Any> getByValue(typeClass: KClass<T>, reference: String, field: String, value: String,
+        vararg children: String): Single<T> {
+        return db.getByChildValue(reference, children, field, value, {
+            if (this.childrenCount > 0) {
+                this.children.first().getValue(typeClass.java)
+            } else {
+                throw RetrievedValueNullException(reference, children)
+            }
+        })
+    }
 
     fun <T : Any> listenForChanges(typeClass: KClass<T>, reference: String,
         vararg children: String): Observable<T> =
