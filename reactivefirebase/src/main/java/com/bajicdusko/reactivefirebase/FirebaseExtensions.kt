@@ -70,7 +70,7 @@ inline fun <T : Any> FirebaseDatabase.get(
       }
 
       override fun onDataChange(dataSnapshot: DataSnapshot?) {
-        val childSnapshot = dataSnapshot forChildren children
+        val childSnapshot = dataSnapshot forChildrenOrOriginal children
         childSnapshot?.let {
           val childValue = getChildValueFn(it)
           childValue?.let {
@@ -121,7 +121,7 @@ inline fun <T : Any> FirebaseDatabase.listenForChanges(
       }
 
       override fun onDataChange(dataSnapshot: DataSnapshot?) {
-        val childSnapshot = dataSnapshot forChildren children
+        val childSnapshot = dataSnapshot forChildrenOrOriginal children
         childSnapshot?.let {
           val childValue = getChildValueFn(childSnapshot)
           childValue?.let {
@@ -214,7 +214,7 @@ inline fun <T : Any> FirebaseDatabase.lastOrSortedValue(
   defaultValue: T?
 ): Single<T> {
   return Single.create<T> { emitter ->
-    val childReference = getReference(reference) forChildren children
+    val childReference = getReference(reference) forChildrenOrOriginal children
     childReference?.let {
       var lastValueQuery: Query = it.orderByChild(lastByOrSortField)
       if (lastValue) {
@@ -270,109 +270,145 @@ inline fun <T : Any> FirebaseDatabase.write(
   crossinline writeValueFn: DatabaseReference.() -> T?
 ): Single<T> {
   return Single.fromCallable({
-    val childReference = getReference(reference) forChildren children
+    val childReference = getReference(reference) forChildrenOrOriginal children
     childReference?.let {
       writeValueFn(it)
     } ?: throw FirebaseDatabaseException.databaseReferenceIssue(reference, children)
   })
 }
-inline fun <T : Any> FirebaseDatabase.getByKey(reference: String, children: Array<out String>?, key: String,
-    crossinline onDataSnapshot: DataSnapshot.() -> T?): Single<T> {
-    return Single.create<T> {
-        val dataReference = getReference(reference).childOrOriginalDataReference(children)
-        if (dataReference == null) {
-            it.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
-        } else {
-            val firstItemQuery = dataReference.orderByKey().equalTo(key).limitToFirst(1)
-            firstItemQuery.addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onCancelled(dbError: DatabaseError?) {
-                    it.cancel(dbError, reference, children, {
-                        firstItemQuery.removeEventListener(this)
-                    })
-                }
 
-                override fun onDataChange(dataSnapshot: DataSnapshot?) {
-                    it.readData(dataSnapshot, reference, children, onDataSnapshot, {
-                        firstItemQuery.removeEventListener(this)
-                    })
-                }
-            })
+/**
+ * This is the extension function on [FirebaseDatabase] for getting the result by provided key value.
+ *
+ * @param reference Root reference value. Usually, table name
+ * @param children Array children's to target a specific object
+ * @param key Query and [DatabaseReference.orderByKey] will be called on this value.
+ * @return First item found for [key] value.
+ */
+inline fun <T : Any> FirebaseDatabase.getByKey(
+  reference: String,
+  children: Array<out String>?,
+  key: String,
+  crossinline getChildValueFn: DataSnapshot.() -> T?
+): Single<T> {
+  return Single.create<T> { emitter ->
+    val childReference = getReference(reference) forChildrenOrOriginal children
+
+    childReference?.let {
+      val firstItemQuery = childReference.orderByKey().equalTo(key).limitToFirst(1)
+      firstItemQuery.addListenerForSingleValueEvent(object : ValueEventListener {
+        override fun onCancelled(dbError: DatabaseError?) {
+          emitter.cancel(dbError, reference, children, {
+            firstItemQuery.removeEventListener(this)
+          })
         }
-    }
+
+        override fun onDataChange(dataSnapshot: DataSnapshot?) {
+          emitter.readData(dataSnapshot, reference, children, getChildValueFn, {
+            firstItemQuery.removeEventListener(this)
+          })
+        }
+      })
+    } ?: emitter.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
+  }
 }
 
-inline fun <T : Any> FirebaseDatabase.getByChildValue(reference: String, children: Array<out String>?, field: String,
-    value: String, crossinline onDataSnapshot: DataSnapshot.() -> T?): Single<T> {
-    return Single.create<T> {
-        val dataReference = getReference(reference).childOrOriginalDataReference(children)
+/**
+ * This is the extension function on [FirebaseDatabase] for getting the result by provided child value.
+ *
+ * @param reference Root reference value. Usually, table name
+ * @param children Array children's to target a specific object
+ * @param field Is the name of the property/field which is used for sorting the items by using [DatabaseReference.orderByChild]
+ * @param value Compose query created for [field] ordering and equal the value under [field] with this value.
+ * @return First item found.
+ */
+inline fun <T : Any> FirebaseDatabase.getByChildValue(
+  reference: String,
+  children: Array<out String>?,
+  field: String,
+  value: String,
+  crossinline getChildValueFn: DataSnapshot.() -> T?
+): Single<T> {
+  return Single.create<T> { emitter ->
+    val dataReference = getReference(reference) forChildrenOrOriginal children
 
-        if (dataReference == null) {
-            it.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
-        } else {
-            val foundChildQuery = dataReference.orderByChild(field).equalTo(value).limitToFirst(1)
-            foundChildQuery.addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onCancelled(dbError: DatabaseError?) {
-                    it.cancel(dbError, reference, children, {
-                        foundChildQuery.removeEventListener(this)
-                    })
-                }
-
-                override fun onDataChange(dataSnapshot: DataSnapshot?) {
-                    it.readData(dataSnapshot, reference, children, onDataSnapshot, {
-                        foundChildQuery.removeEventListener(this)
-                    })
-                }
-            })
+    dataReference?.let {
+      val foundChildQuery = dataReference.orderByChild(field).equalTo(value).limitToFirst(1)
+      foundChildQuery.addListenerForSingleValueEvent(object : ValueEventListener {
+        override fun onCancelled(dbError: DatabaseError?) {
+          emitter.cancel(dbError, reference, children, {
+            foundChildQuery.removeEventListener(this)
+          })
         }
-    }
+
+        override fun onDataChange(dataSnapshot: DataSnapshot?) {
+          emitter.readData(dataSnapshot, reference, children, getChildValueFn, {
+            foundChildQuery.removeEventListener(this)
+          })
+        }
+      })
+    } ?: emitter.onError(FirebaseDatabaseException.databaseReferenceIssue(reference, children))
+  }
 }
 
-inline fun <T : Any> SingleEmitter<T>.cancel(dbError: DatabaseError?, reference: String, children: Array<out String>?,
-    removeCallback: () -> Unit) {
-    onError(FirebaseDatabaseException.databaseIssue(dbError?.message, dbError?.details, reference, children))
-    removeCallback()
+/**
+ * Extension function for [SingleEmitter] used for handling the cancellation of the stream.
+ */
+inline fun <T : Any> SingleEmitter<T>.cancel(
+  dbError: DatabaseError?,
+  reference: String,
+  children: Array<out String>?,
+  removeCallback: () -> Unit
+) {
+  onError(FirebaseDatabaseException.databaseIssue(dbError?.message, dbError?.details, reference, children))
+  removeCallback()
 }
 
-inline fun <T : Any> SingleEmitter<T>.readData(dataSnapshot: DataSnapshot?, reference: String,
-    children: Array<out String>?, crossinline onDataSnapshot: DataSnapshot.() -> T?, removeCallback: () -> Unit) {
-    if (dataSnapshot != null) {
-        val retrievedValue = onDataSnapshot(dataSnapshot)
-        if (retrievedValue == null) {
-            onError(RetrievedValueNullException(reference,
-                children))
-        } else {
-            onSuccess(retrievedValue)
-        }
-    } else {
-        onError(FirebaseDatabaseException.dataSnapshotIssue(reference, children))
-    }
-    removeCallback()
+/**
+ * Extension function for [SingleEmitter] used for handling the read of the data in the stream.
+ */
+inline fun <T : Any> SingleEmitter<T>.readData(
+  dataSnapshot: DataSnapshot?,
+  reference: String,
+  children: Array<out String>?,
+  crossinline getChildValueFn: DataSnapshot.() -> T?,
+  removeCallback: () -> Unit
+) {
+  dataSnapshot?.let {
+    val childValue = getChildValueFn(dataSnapshot)
+    childValue?.let {
+      onSuccess(it)
+    } ?: onError(RetrievedValueNullException(reference, children))
+  }
+
+  removeCallback()
 }
 
-fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out String>?,
-    value: T) =
-    writeValue(reference, children, {
-        setValue(value)
-        value
-    })
+fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out String>?, value: T) =
+  writeValue(reference, children, {
+    setValue(value)
+    value
+  })
 
-inline fun <T : Any> FirebaseDatabase.writeValue(reference: String, children: Array<out String>?,
-    crossinline onDataReference: DatabaseReference.() -> T?): Single<T> =
-    Single.fromCallable({
-        val childDataReference = getReference(reference).childOrOriginalDataReference(children)
-        if (childDataReference != null) {
-            onDataReference(childDataReference)
-        } else {
-            throw FirebaseDatabaseException.databaseReferenceIssue(reference, children)
-        }
-    })
+inline fun <T : Any> FirebaseDatabase.writeValue(
+  reference: String,
+  children: Array<out String>?,
+  crossinline writeValue: DatabaseReference.() -> T?
+): Single<T> {
+  return Single.fromCallable({
+    val childDataReference = getReference(reference).forChildrenOrOriginal(children)
+    childDataReference?.let {
+      writeValue(childDataReference)
+    } ?: throw FirebaseDatabaseException.databaseReferenceIssue(reference, children)
+  })
+}
 
 fun FirebaseDatabase.remove(
   reference: String,
   children: Array<out String>?
 ): Single<Any> {
   return Single.fromCallable {
-    val childReference = getReference(reference) forChildren children
+    val childReference = getReference(reference) forChildrenOrOriginal children
     childReference?.let {
       it.removeValue()
       IRRELEVANT
@@ -384,38 +420,29 @@ fun FirebaseDatabase.remove(
  * Iterating through children of [DatabaseReference] and returning last found child [DatabaseReference]
  * If there are no children, returning original DatabaseReference
  */
-infix fun DatabaseReference?.forChildren(children: Array<out String>?): DatabaseReference? {
+infix fun DatabaseReference?.forChildrenOrOriginal(children: Array<out String>?): DatabaseReference? {
   var childReference = this
   children?.forEach {
     childReference = childReference forChild it
   }
-fun DatabaseReference?.childOrOriginalDataReference(children: Array<out String>?): DatabaseReference? {
-    var tempReference = this
-    children?.forEach {
-        tempReference = tempReference.subDataReference(it)
-    }
 
   return childReference
 }
 
-infix fun DatabaseReference?.forChild(child: String): DatabaseReference? = this?.child(child)
 
 /**
  * Iterating through children of [DataSnapshot] and returning last found child [DataSnapshot]
  * If there are no children, returning original DataSnapshot
  */
-infix fun DataSnapshot?.forChildren(children: Array<out String>?): DataSnapshot? {
+infix fun DataSnapshot?.forChildrenOrOriginal(children: Array<out String>?): DataSnapshot? {
   var childSnapshot = this
   children?.forEach {
     childSnapshot = childSnapshot forChild it
   }
-fun DataSnapshot?.childOrOriginalDataSnapshot(children: Array<out String>?): DataSnapshot? {
-    var tempSnapshot = this
-    children?.forEach {
-        tempSnapshot = tempSnapshot.subDataSnapshot(it)
-    }
 
   return childSnapshot
 }
+
+infix fun DatabaseReference?.forChild(child: String): DatabaseReference? = this?.child(child)
 
 infix fun DataSnapshot?.forChild(child: String): DataSnapshot? = this?.child(child)

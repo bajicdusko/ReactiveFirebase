@@ -1,15 +1,16 @@
 package com.bajicdusko.reactivefirebase
 
+import com.bajicdusko.reactivefirebase.exception.FirebaseUnknownSignInException
+import com.bajicdusko.reactivefirebase.exception.RetrievedValueNullException
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.database.FirebaseDatabase
-import com.pastecan.data.exception.FirebaseUnknownSignInException
 import io.reactivex.Observable
 import io.reactivex.Single
 import kotlin.reflect.KClass
 
-class FirebaseRepository constructor(val firebaseAuth: FirebaseAuth, val db: FirebaseDatabase) {
+open class FirebaseRepository constructor(val firebaseAuth: FirebaseAuth, val db: FirebaseDatabase) {
 
   fun isLoggedIn(): Single<Boolean> = Single.fromCallable({
     firebaseAuth.currentUser != null
@@ -51,6 +52,47 @@ class FirebaseRepository constructor(val firebaseAuth: FirebaseAuth, val db: Fir
   fun <T : Any> get(typeClass: KClass<T>, reference: String, vararg children: String): Single<T> =
     db.get(reference, children, { getValue(typeClass.java) })
 
+  fun <T : Any> getMap(listItemTypeClass: KClass<T>, reference: String,
+    vararg children: String): Single<Map<String, List<T>>> {
+    return db.get(reference, children, {
+      val map = HashMap<String, List<T>>()
+
+      this.children.forEach { mapKey ->
+        val list = mutableListOf<T>()
+        mapKey.children.forEach {
+          val value = it.getValue(listItemTypeClass.java)
+          if (value != null) {
+            list.add(value)
+          }
+        }
+
+        map[mapKey.key] = list
+      }
+
+      map
+    }, emptyMap())
+  }
+
+  fun <T : Any> getByValue(typeClass: KClass<T>, reference: String, field: String, value: String,
+    vararg children: String): Single<T> {
+    return db.getByChildValue(reference, children, field, value, {
+      if (this.childrenCount > 0) {
+        this.children.first().getValue(typeClass.java)
+      } else {
+        throw RetrievedValueNullException(reference, children)
+      }
+    })
+  }
+
+  fun <T : Any> getLast(
+    typeClass: KClass<T>,
+    reference: String,
+    lastByField: String,
+    vararg children: String
+  ): Single<T> {
+    return db.lastValue(reference, children, lastByField, { getValue(typeClass.java) })
+  }
+
   fun <T : Any> getList(typeClass: KClass<T>, reference: String, vararg children: String): Single<List<T>> {
     return db.get(reference, children, {
       val mutableList = mutableListOf<T>()
@@ -62,15 +104,6 @@ class FirebaseRepository constructor(val firebaseAuth: FirebaseAuth, val db: Fir
       }
       mutableList
     }, emptyList())
-  }
-
-  fun <T : Any> getLast(
-    typeClass: KClass<T>,
-    reference: String,
-    lastByField: String,
-    vararg children: String
-  ): Single<T> {
-    return db.lastValue(reference, children, lastByField, { getValue(typeClass.java) })
   }
 
   fun <T : Any> getSortedList(
